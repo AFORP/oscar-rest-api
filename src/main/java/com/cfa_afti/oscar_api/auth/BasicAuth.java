@@ -54,7 +54,8 @@ public class BasicAuth
 			getUserInfos(rc.user().principal().getString("username"))
 				.onSuccess((receivedJson) ->
 				{
-					JsonObject jsonUserInfos = receivedJson.getJsonObject(0);
+					System.out.println(">>>>>>>>>>>"+receivedJson);
+					JsonObject jsonUserInfos = receivedJson.getJsonArray("data").getJsonObject(0);
 
 					JsonObject customJwtTokenData = new JsonObject();
 					JsonObject customJwtRefreshTokenData = new JsonObject();
@@ -133,9 +134,9 @@ public class BasicAuth
 	 *
 	 * @return Retourne un JsonObject contenant les données de l'utilisateur.
 	 */
-	public Future<JsonArray> getUserInfos(String username)
+	public Future<JsonObject> getUserInfos(String username)
 	{
-		Promise<JsonArray> promise = Promise.promise();
+		Promise<JsonObject> promise = Promise.promise();
 
 		String sqlQuery = "SELECT * FROM Users WHERE username_user=?;";
 
@@ -146,8 +147,8 @@ public class BasicAuth
 				.put("query_params", new JsonArray().add(username)))
 			.onSuccess((msg) ->
 			{
-				System.out.println(msg.body());
-				promise.complete((JsonArray) msg.body());
+				JsonObject jsonMsg = (JsonObject)msg.body();
+				promise.complete(jsonMsg);
 			})
 			.onFailure((event) ->
 				promise.fail(String.format("La requête \"%s\" a échoué avec la valeur \"%s\".", sqlQuery, username)));

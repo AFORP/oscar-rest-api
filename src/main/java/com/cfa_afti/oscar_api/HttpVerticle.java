@@ -5,7 +5,11 @@
  */
 package com.cfa_afti.oscar_api;
 
+import static com.cfa_afti.oscar_api.MainVerticle.API_CONFIG;
 import com.cfa_afti.oscar_api.auth.BasicAuth;
+import com.cfa_afti.oscar_api.endpoints_id.EndpointsEtape;
+import com.cfa_afti.oscar_api.endpoints_id.EndpointsGroupe;
+import com.cfa_afti.oscar_api.endpoints_id.EndpointsScenario;
 import com.cfa_afti.oscar_api.tools.JsonResponse;
 import com.cfa_afti.oscar_api.v1.EtapeController;
 import com.cfa_afti.oscar_api.v1.GroupeController;
@@ -27,216 +31,228 @@ import io.vertx.ext.web.handler.BasicAuthHandler;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.CorsHandler;
 import io.vertx.ext.web.handler.JWTAuthHandler;
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class HttpVerticle
 	extends AbstractVerticle
 {
-  public static HttpVerticle verticleInstance = null;
+	public static final Logger LOGGER = Logger.getLogger(HttpVerticle.class.getName());
+	public static HttpVerticle verticleInstance = null;
 
-  private HttpServer httpServer;
-  public JWTAuth jwtProvider;
+	private HttpServer httpServer;
+	public JWTAuth jwtProvider;
 
-  public HttpVerticle()
-  {
-  }
-
-  @Override
-  public void start(Promise<Void> startPromise)
-	  throws Exception
-  {
-	configureJWTAuth();
-
-	BasicAuthHandler basicAuthHandler = BasicAuthHandler.create(SqlDbVerticle.sqlProvider);//Authorization: Basic <base64(email:pwd)>
-	JWTAuthHandler jwtAuthHandler = JWTAuthHandler.create(jwtProvider);//Authorization: Bearer <JWT>
-
-	Router router = Router.router(this.vertx);
-
-	Set<String> allowedHeaders = new HashSet<>();
-	allowedHeaders.add(HttpHeaders.ORIGIN.toString());
-	allowedHeaders.add(HttpHeaders.CONTENT_TYPE.toString());
-	allowedHeaders.add(HttpHeaders.AUTHORIZATION.toString());
-	allowedHeaders.add(HttpHeaders.APPLICATION_X_WWW_FORM_URLENCODED.toString());
-	allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS.toString());
-	allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS.toString());
-	allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS.toString());
-	allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN.toString());
-	allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS.toString());
-	allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD.toString());
-	allowedHeaders.add(HttpHeaders.VARY.toString());
-
-	Set<HttpMethod> allowedMethods = new HashSet<>();
-	allowedMethods.add(HttpMethod.GET);
-	allowedMethods.add(HttpMethod.POST);
-	allowedMethods.add(HttpMethod.PUT);
-	allowedMethods.add(HttpMethod.PATCH);
-	allowedMethods.add(HttpMethod.DELETE);
-	allowedMethods.add(HttpMethod.OPTIONS);
-
-	router.route().handler(CorsHandler.create()
-		.addOrigin("http://localhost:25000/")
-		.allowCredentials(true)
-		.allowedHeaders(allowedHeaders)
-		.allowedMethods(allowedMethods));
-
-	router.route().handler(BodyHandler.create());
-	/*
-	 * Options autorisées dans les API REST :
-	 * GET : Accède à une ressource.
-	 * POST : Ajoute une ressource.
-	 * PUT : Met à jour une ressource omplète en la remplacent par une
-	 * nouvelle version (99% des cas).
-	 * PATCH : Met à jour une partie d'une ressource en envoyant un
-	 * différentiel (sorte de git diff).
-	 * DELETE : Supprime une ressource.
-	 */
-	router.route("/").handler((rc) ->
-		rc.response().end("Bienvenue sur l'API du projet OSCAR !"));
-
-	router.get("/basic-auth/")
-		.handler(basicAuthHandler)
-		.handler(new BasicAuth(this.vertx, this.jwtProvider));
-
-	router.get("/examples/")
-		.handler((rc) ->
-		{
-		  rc.response().putHeader("Content-Type", "application/json");//L'en-tête pour avertir les navigateurs que l'on envoie du JSON.
-		  JsonResponse jr = new JsonResponse();//La réponse JSON qui sera faite aux utilisateurs.
-		  jr.getResult()
-			  .put("/examples/", "Cette page. Vous y trouverez tous les exemples qui pourront vous aider.")
-			  .put("/", "Page d'accueil de l'API.")
-			  .put("/path-params/:userId/?userName", "Pour tester la réception de paramètres dans l'URL.")
-			  .put("/exemple-requete", "Un exemple de requête SQL.")
-			  .put("/generate-pwd", "Pour générer un mot de passe.");
-
-		  rc.response().end(jr.toString());//On envoie la réponse au client.
-		});
-
-	router.post("/path-params/:userId/").handler((rc) ->
+	public HttpVerticle()
 	{
-	  try
-	  {
-		rc.response().putHeader("Content-Type", "application/json");
+	}
 
-		JsonResponse jr = new JsonResponse();
+	@Override
+	public void start(Promise<Void> startPromise)
+		throws Exception
+	{
+		configureJWTAuth();//Permet à un utilisateur de se connecter à l'API via un Json Web Token (JWT).
 
-		rc.request().params().names().forEach((t) ->
-		{
-		  System.out.println(t);
-		});
+		BasicAuthHandler basicAuthHandler = BasicAuthHandler.create(SqlDbVerticle.sqlProvider);//Authorization: Basic <base64(email:pwd)>
+		JWTAuthHandler jwtAuthHandler = JWTAuthHandler.create(jwtProvider);//Authorization: Bearer <JWT>
 
-		rc.request().formAttributes().names().forEach((t) ->
-		{
-		  System.out.println(t);
-		});
+		Router router = Router.router(this.vertx);
 
-		/*
-		 * Path >>> /path-params/12/
-		 * URI >>> /path-params/12/?test=23
-		 * Absolute URI >>> http://localhost:25000/path-params/12/?test=23
-		 * Query >>> test=23
+		//En-têtes autorisées. Selon vos besoins.
+		Set<String> allowedHeaders = new HashSet<>();
+		allowedHeaders.add(HttpHeaders.ORIGIN.toString());
+		allowedHeaders.add(HttpHeaders.CONTENT_TYPE.toString());
+		allowedHeaders.add(HttpHeaders.AUTHORIZATION.toString());
+		allowedHeaders.add(HttpHeaders.APPLICATION_X_WWW_FORM_URLENCODED.toString());
+		allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS.toString());
+		allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS.toString());
+		allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS.toString());
+		allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN.toString());
+		allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS.toString());
+		allowedHeaders.add(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD.toString());
+		allowedHeaders.add(HttpHeaders.VARY.toString());
+
+		//Méthodes HTTP autorisées. Selon vos besoins.
+		Set<HttpMethod> allowedMethods = new HashSet<>();
+		allowedMethods.add(HttpMethod.GET);
+		allowedMethods.add(HttpMethod.POST);
+		allowedMethods.add(HttpMethod.PUT);
+		allowedMethods.add(HttpMethod.PATCH);
+		allowedMethods.add(HttpMethod.DELETE);
+		allowedMethods.add(HttpMethod.OPTIONS);
+
+		router.route().handler(CorsHandler.create()
+			.addOrigin("http://localhost:25000/")
+			.allowCredentials(true)
+			.allowedHeaders(allowedHeaders)
+			.allowedMethods(allowedMethods));
+
+		router.route().handler(BodyHandler.create());
+
+		/* [===HELP===]
+		 * Options autorisées dans les API REST :
+		 * GET : Accède à une ressource.
+		 * POST : Ajoute une ressource.
+		 * PUT : Met à jour une ressource omplète en la remplacent par une
+		 * nouvelle version (99% des cas).
+		 * PATCH : Met à jour une partie d'une ressource en envoyant un
+		 * différentiel (sorte de git diff).
+		 * DELETE : Supprime une ressource.
 		 */
-		jr.getResult()
-			.put("Paramètre obligatoire", rc.request().getParam("userId"))
-			.put("Paramètre optionnel", rc.request().getFormAttribute("inputName"));
+		router.route("/").handler((rc) ->
+			rc.response().end("Bienvenue sur l'API du projet OSCAR !"));
 
-		rc.response().end(jr.toString());
-	  }
-	  catch (Exception e)
-	  {
-		e.printStackTrace();
-	  }
+		router.post("/basic-auth/")
+			.handler(basicAuthHandler)
+			.handler(new BasicAuth(this.vertx, this.jwtProvider));
 
-	});
+		/* [===HELP===]
+		 * Lorsque vous executez l'API, dans votre navigateur, vous pouvez écrire :
+		 *		localhost:[port]/examples/
+		 * afin d'obtenir une liste des requêtes possibles.
+		 */
+		router.get("/examples/")
+			.handler((rc) ->
+			{
+				rc.response().putHeader("Content-Type", "application/json");//L'en-tête pour avertir les navigateurs que l'on envoie du JSON.
+				JsonResponse jr = new JsonResponse();//La réponse JSON qui sera faite aux utilisateurs.
+				jr.getResult()
+					.put("/examples/", "Cette page. Vous y trouverez tous les exemples qui pourront vous aider.")
+					.put("/", "Page d'accueil de l'API.")
+					.put("/path-params/:userId/?userName", "Pour tester la réception de paramètres dans l'URL.")
+					.put("/exemple-requete", "Un exemple de requête SQL.")
+					.put("/generate-pwd", "Pour générer un mot de passe.");
 
-	router.route("/exemple-requete").handler((routingContext) ->
-	{
-	  routingContext.response().putHeader("Content-Type", "application/json");
+				rc.response().end(jr.toString());//On envoie la réponse au client.
+			});
 
-	  this.vertx.eventBus().request(
-		  "sql_queries",
-		  new JsonObject()
-			  .put("query", "SELECT * FROM Users;"))
-		  .onSuccess((msg) ->
-		  {
-			JsonArray ja = (JsonArray) msg.body();
+		router.post("/path-params/:userId/").handler((rc) ->
+		{
+			/*
+			 * Le try/catch n'est pas obligatoire.
+			 * Mais si vous avez une erreur que vous ne comprenez pas, essayez de l'inclure.
+			 */
+			try
+			{
+				rc.response().putHeader("Content-Type", "application/json"); //Le document que l'on renvoit est un JSON.
 
-			routingContext.response().end(ja.toString());
-		  })
-		  .onFailure((event) ->
-			  routingContext.response().end(event.getMessage()));
-	});
+				/*
+				 * La classe JsonResponse vous aide à créer la réponse à une requête.
+				 */
+				JsonResponse jr = new JsonResponse();
 
-	router.route("/generate-pwd/:pwd/").handler((rc) ->
-	{
-	  rc.response().putHeader("Content-Type", "application/json");
+				rc.request().params().names().forEach((t) ->
+				{
+					System.out.println(t);
+				});
 
-	  String pwd = rc.request().getParam("pwd");
-	  String hash;
-	  boolean failurePwdGen = true;
-	  JsonResponse jr = new JsonResponse();
+				rc.request().formAttributes().names().forEach((t) ->
+				{
+					System.out.println(t);
+				});
 
-	  try
-	  {
-		hash = SqlDbVerticle.sqlProvider.hash(
-			"pbkdf2", // hashing algorithm (OWASP recommended)
-			VertxContextPRNG.current().nextString(32), // secure random salt
-			pwd // password
-		);
+				/* [===HELP===]
+				 * Voici un exemple de ce que vous pouvez trouver en faisant rc.request().*
+				 * .path() >>> /path-params/12/
+				 * .uri() >>> /path-params/12/?test=23
+				 * .absoluteURI() >>> http://localhost:25000/path-params/12/?test=23
+				 * .query() >>> test=23
+				 */
+				jr.getResult()
+					.put("Paramètre obligatoire", rc.request().getParam("userId")) //superURL/:userId
+					.put("Paramètre optionnel", rc.request().getFormAttribute("inputName")); //superURL?inputName=Toto
 
-		failurePwdGen = true;
-	  }
-	  catch (Exception e)
-	  {
-		e.printStackTrace();
-	  }
-	  finally
-	  {
+				rc.response().end(jr.toString());
+			}
+			catch (Exception e)
+			{
+				e.printStackTrace();
+			}
 
-	  }
+		});
 
-//			JsonObject jo = new JsonResponse()
-//				.setHttpCode((short) 200)
-//				.setResult(new JsonObject()
-//					.put("pwd", pwd)
-//					.put("hash", hash))
-//				.getBody();
-//
-//			rc.response().end(jo.toString());
-	});
+		/* [===HELP===]
+		 * Pour celles et ceux qui reprendront ce code, voici un petit
+		 * exemple de ce à quoi ressemble la gestion d'une requête.
+		 */
+		router.route("/exemple-requete").handler((routingContext) ->
+		{
+			routingContext.response().putHeader("Content-Type", "application/json");
 
-	//router.route("/*").handler(jwtAuthHandler);
-	/*
-	 * GET /groupes/ - FAIL
-	 * GET /scenarios/ - FAIL
-	 * GET /scenarios/?groupe=n - FAIL
-	 * GET /scenarios/:id/ - FAIL
-	 * POST /scenarios/ :data - FAIL
-	 *
-	 * GET /groupes/ - FAIL
-	 * POST /groupes/ :data - FAIL
-	 *
-	 */
-	router.get("/scenarios/").handler((rc) ->
-		new ScenarioController(vertx).handle(rc));
-	router.get("/scenarios/:id/").handler((rc) ->
-		new ScenarioController(vertx).handle(rc));
+			this.vertx.eventBus().request(
+				"sql_queries",
+				new JsonObject()
+					.put("query", "SELECT * FROM Users;"))
+				.onSuccess((msg) ->
+				{
+					/*
+					 * msg est un objet "Message" circulant à travers le bus d'événements.
+					 *
+					 */
+					JsonArray ja = (JsonArray) msg.body();
 
-	router.get("/groupes/").handler((rc) ->
-		new GroupeController(vertx).handle(rc));
-	router.post("/groupes/:label/").handler((rc) ->
-		new GroupeController(vertx).handle(rc));
+					routingContext.response().end(ja.toString());
+				})
+				.onFailure((event) ->
+					routingContext.response().end(event.getMessage()));
+		});
 
-	//router.put("/scenario/:data").handler(new ScenarioController(vertx));
-//	router.get("/localisation/").handler((rc) ->
-//		new LocalisationController(vertx));
-	router.get("/etapes/").handler((rc) ->
-		new EtapeController(this.vertx));
-	router.post("/etapes/:data/").handler((rc) ->
-		new EtapeController(this.vertx));
 
-	//router.route().handler(chainAuthHandler);//<- A partir d'ici, tout nécéssite une authentification JWT.
+		router.get("/generate-pwd/:pwd").handler((rc) ->
+		{
+			rc.response().putHeader("Content-Type", "application/json");
+
+			String pwd = rc.request().getParam("pwd");
+			String hash;
+
+			hash = SqlDbVerticle.sqlProvider.hash(
+				"pbkdf2", //Algorithme de Hashage (recommandé par l'OWASP)
+				VertxContextPRNG.current().nextString(32), //Sel sécurisé et aléatoire
+				pwd); //Mot de passe à hacher
+
+			JsonResponse jr = new JsonResponse();
+
+			jr.setStatus("SUCCESS");
+			jr.getResult()
+				.put("pwd", pwd)
+				.put("pwd-hash", hash);
+
+			rc.response().end(jr.toString());
+		});
+
+		//Toutes les routes
+
+		router.get("/scenarios/").handler((rc) ->
+			new ScenarioController(vertx, EndpointsScenario.GET_SCENARIOS).handle(rc));
+		router.get("/scenarios/:id/").handler((rc) ->
+			new ScenarioController(vertx, EndpointsScenario.GET_SCENARIO).handle(rc));
+		router.post("/scenarios/").handler((rc) ->
+			new ScenarioController(vertx, EndpointsScenario.POST_SCENARIO).handle(rc));
+		router.delete("/scenarios/:id/").handler((rc) ->
+			new ScenarioController(vertx, EndpointsScenario.DELETE_SCENARIO).handle(rc));
+
+		router.get("/groupes/").handler((rc) ->
+			new GroupeController(vertx, EndpointsGroupe.GET_GROUPES).handle(rc));
+		router.post("/groupes/:label/").handler((rc) ->
+			new GroupeController(vertx, EndpointsGroupe.POST_GROUPE).handle(rc));
+		router.delete("/groupes/:id/").handler((rc) ->
+			new GroupeController(vertx, EndpointsGroupe.DELETE_GROUPE).handle(rc));
+
+		router.get("/etapes/:id/").handler((rc) ->
+			new EtapeController(this.vertx, EndpointsEtape.GET_ETAPE_BY_ID).handle(rc));
+		router.post("/etapes/").handler((rc) ->
+			new EtapeController(this.vertx, EndpointsEtape.POST_ETAPE).handle(rc));
+		router.delete("/etapes/:id/").handler((rc) ->
+			new EtapeController(this.vertx, EndpointsEtape.DELETE_ETAPE).handle(rc));
+
+//		router.route().handler(chainAuthHandler);//<- A partir d'ici, tout nécéssite une authentification JWT.
 //		router.route("/refresh").handler((rc) ->
 //			new RefreshToken(this.jwtProvider, rc).start());
 //		router.route("/jwt-auth").handler((routingContext) ->
@@ -246,99 +262,56 @@ public class HttpVerticle
 //			response.write("Authentification JWT.");
 //			response.end();
 //		});
-	//SSLCertificateFile /etc/letsencrypt/live/my-domain/cert9.pem
-	//SSLCertificateKeyFile /etc/letsencrypt/live/my-domain/privkey9.pem
-	vertx.createHttpServer(
-		new HttpServerOptions()
-			.setSsl(false))
-		/*
-		 * .setSsl(true)
-		 * .setClientAuth(ClientAuth.REQUEST)
-		 * .setPemKeyCertOptions(new PemKeyCertOptions()
-		 * .setCertPath("LetsEncrypt/cert.pem")
-		 * .setKeyPath("LetsEncrypt/privkey.pem"))
-		 */
-		.requestHandler(router)
-		.listen(25000)
-		.onSuccess((server) ->
-		{
-		  System.out.println("Serveur démarré sur le port : "
-			  + server.actualPort() + ".");
-		})
-		.onFailure((event) ->
-		{
-		  System.out.println("Echec de démarrage du serveur : "
-			  + event.getMessage());
-		});
 
-	startPromise.complete();
-  }
+		vertx.createHttpServer(
+			new HttpServerOptions())
+//				.setSsl(true)
+//				.setClientAuth(ClientAuth.REQUEST)
+//				.setPemKeyCertOptions(new PemKeyCertOptions()
+//					.setCertPath("/path/to/cert.pem")
+//					.setKeyPath("/path/to/privkey.pem")))
+			.requestHandler(router)
+			.listen(API_CONFIG.getInteger("http.port"))
+			.onSuccess((server) ->
+			{
+				System.out.println("Serveur démarré sur le port : "
+					+ server.actualPort() + ".");
+			})
+			.onFailure((event) ->
+			{
+				System.out.println("Echec de démarrage du serveur : "
+					+ event.getMessage());
+			});
 
-  public HttpServer getHttpServer()
-  {
-	return httpServer;
-  }
-
-  private void configureJWTAuth()
-  {
-	try
-	{
-	  this.jwtProvider = JWTAuth.create(
-		  this.vertx,
-		  new JWTAuthOptions()
-			  .addPubSecKey(new PubSecKeyOptions()
-				  .setAlgorithm("RS256")
-				  .setBuffer("-----BEGIN PUBLIC KEY-----\n"
-					  + "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2wOjnWcsbheZd8a6UzUi\n"
-					  + "5PTEaquTxEO08+W0kc/TV9hOJxogQjTVB03+3KKjI1CYWi0YbdhHBJsnZsMIv99n\n"
-					  + "qy0nWR+odsCK+SPI5YNMy0bzxY2O8f64pc6evyBKmvbu9Ixr+lHRwxlP7tmrsj/m\n"
-					  + "/pa0n7yo12AmOTxnPKZsI9zYVh1vrfq9GbIyYe8h8Nm5pBv3SzGCQlyHUjdnGxZq\n"
-					  + "r+vhIXEnvdtAD+6F8PApvNg88CI20h5bJmVwDftILnmkz6/c9VPvDiJofGFzcDiQ\n"
-					  + "PPamt3nnfPUa/PNLYawYL4H0r0+MkADYoK2ehKsWNBh2Hj42BR3LxjRKoyUZ9by3\n"
-					  + "uwIDAQAB\n"
-					  + "-----END PUBLIC KEY-----"))
-			  .addPubSecKey(new PubSecKeyOptions()
-				  .setAlgorithm("RS256")
-				  .setBuffer("-----BEGIN PRIVATE KEY-----\n"
-					  + "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDbA6OdZyxuF5l3\n"
-					  + "xrpTNSLk9MRqq5PEQ7Tz5bSRz9NX2E4nGiBCNNUHTf7coqMjUJhaLRht2EcEmydm\n"
-					  + "wwi/32erLSdZH6h2wIr5I8jlg0zLRvPFjY7x/rilzp6/IEqa9u70jGv6UdHDGU/u\n"
-					  + "2auyP+b+lrSfvKjXYCY5PGc8pmwj3NhWHW+t+r0ZsjJh7yHw2bmkG/dLMYJCXIdS\n"
-					  + "N2cbFmqv6+EhcSe920AP7oXw8Cm82DzwIjbSHlsmZXAN+0gueaTPr9z1U+8OImh8\n"
-					  + "YXNwOJA89qa3eed89Rr880thrBgvgfSvT4yQANigrZ6EqxY0GHYePjYFHcvGNEqj\n"
-					  + "JRn1vLe7AgMBAAECggEAVrGsFGSAy9t/nlAF9WX1OBhDn83nIiuC94CX55gSmpU+\n"
-					  + "6m+HEW4EXW3cUs32McZ3aEqtft27zvDzudO+JOV0DehDyR2k+8zfthsaLO+6eETP\n"
-					  + "vgV47gXcZZXSdOl9XrYchKUJIP8+PzJH185GDrsI3wIc4ZY2Z3rh5oooe3ONHuxT\n"
-					  + "BYjia4lax/Kq96AnrQ6Sl2P3++pT4ubEvbjaRfVpTL1McRB4HFxH3aGCxv3FpL7m\n"
-					  + "YZQcKlxSwSKPTIGkvw8fJOMAmM79P4rg36OltA1SOFaR97e5feZ0Xgzk5tGaz9H8\n"
-					  + "6KfvdM25FWByyy2qOY+aQaz+CkMUMPj/EGfURQSfwQKBgQD1/hfDc63G+kICKWw/\n"
-					  + "ocLEjd21uG/YZX1Fy1EJrDT/CpQofzD8ovyNGXCIXJgINInFqfWdS2lgaBAX1Jq/\n"
-					  + "3kZFy1D8oL5/AfsDAHCPZ1ipIDVeBackj9a3eorR+FoYP11Kh3RUvLmgrDMbqSkf\n"
-					  + "XkN4ERzruzvczDYM+O7aONR6iwKBgQDj7JQXMcvnAvvfhBchae27TJx7y+35Ou3T\n"
-					  + "LR+PmEpdq8pgr2LVYcJL12TSm8eJTQ17l3adDepvJ1twWeSssz0oi3HUCVpYtsDm\n"
-					  + "yp/mOnZAYhS55j77ylL2srDCUfyp2pVP/mbU8GCt96klfRCVuG0zZ92JxJydcfpz\n"
-					  + "feUgQAbNkQKBgHDBP3M/mvAR1h/XjN697uDZhj69g8bU/k73mvWsEb61wqOtaW7j\n"
-					  + "5o9mkcZvauCX9G6+MO8gmfSuvnGt6iD4aY2kXELwC2F8Lup5UR7qaCFduhiWzr5b\n"
-					  + "kDgZ23fTNrjWkpSO8ivFNfEH/YU4TLksJBDtByymbhIPKNdZY2JzmjFxAoGAT47Y\n"
-					  + "8m+zWOO1v4N//23WSbaoOJ4qZwCm2zu49IqYCrJYZf9SZGFHTOnWi51MvSRkPGvW\n"
-					  + "P2QIHNyEEmeOZqn6AxkJlpXdL3I7S1QXFGn7tOWHjoxMF9+7rdkZ0fqEU1W1IMMQ\n"
-					  + "aeuuE4uLQ0awb1J866Cpt9klQd/zKDUdsXAn78ECgYEAg2/QlKWHB2xCEq5vYtY7\n"
-					  + "+PcFVmgLB259dconRLETe/5pV4RH7hwJQhvgKrjyzTUTPt/bQA86GvMmiyiNBJI/\n"
-					  + "gNii8LTdTtc2KUAP3tca+qPZ0ezgA8l+NLDeiQzbu/TnLnsbAOB4RSp8OZ11Vpp7\n"
-					  + "KDaRaEfgcf+z9PeM6yMiZCA=\n"
-					  + "-----END PRIVATE KEY-----")
-			  ));
+		startPromise.complete();
 	}
-	catch (Exception e)
-	{
-	  e.printStackTrace();
-	}
-  }
 
-//	private void configureWebClient()
-//	{
-//		WebClientOptions options = new WebClientOptions()
-//			.setConnectTimeout(10000);
-//		this.webClient = WebClient.create(this.vertx, options);
-//	}
+	public HttpServer getHttpServer()
+	{
+		return httpServer;
+	}
+
+	private void configureJWTAuth()
+	{
+		try
+		{
+			this.jwtProvider = JWTAuth.create(
+				this.vertx,
+				new JWTAuthOptions()
+					.addPubSecKey(new PubSecKeyOptions()
+						.setAlgorithm("RS256")
+						.setBuffer(Files.readString(Path.of(new URI("file:///opt/oscar-rest-api/keys/publicKey.pem")))))
+					.addPubSecKey(new PubSecKeyOptions()
+						.setAlgorithm("RS256")
+						.setBuffer(Files.readString(Path.of(new URI("file:///opt/oscar-rest-api/keys/privateKey.pem"))))
+					));
+		}
+		catch (IOException | URISyntaxException e)
+		{
+			e.printStackTrace();
+
+			LOGGER.log(Level.SEVERE, "Fichier introuvable : {0}.", e.getMessage());
+			this.vertx.close();
+		}
+	}
 }
