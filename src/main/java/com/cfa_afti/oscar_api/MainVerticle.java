@@ -60,7 +60,7 @@ public class MainVerticle extends AbstractVerticle
 		 */
 		ConfigStoreOptions fileStore = new ConfigStoreOptions()
 			.setType("file")
-			.setConfig(new JsonObject().put("path", "/home/alliagesphere/Bureau/oscar-rest-api/conf/api-conf.json"));//"/opt/oscar_api/conf/api-conf.json"
+			.setConfig(new JsonObject().put("path", "/opt/oscar-rest-api/conf/api-conf.json"));//"/opt/oscar_api/conf/api-conf.json"
 
 		ConfigRetriever retriever = ConfigRetriever.create(
 			vertx,
